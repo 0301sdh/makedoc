@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { relative } from "node:path";
 import { parseArgs } from "node:util";
+import { AGENT_NAMES, AGENTS, type Agent, connectAgents, isAgent } from "./agents.js";
 import { checkDocs } from "./check.js";
 import { buildCollectPrompt } from "./collect.js";
-import { installSkill } from "./init.js";
 
 export interface Io {
   stdout: (text: string) => void;
@@ -15,14 +16,22 @@ Usage:
   makedoc <command> [options]
 
 Commands:
-  init           Add the /makedoc skill to Claude Code in this project
-  collect        Print the materials and steps for the AI to write the docs
-  check          Find missing or outdated parts of the docs
+  init            Add the makedoc skill to AI tools in this project
+  collect         Print the materials and steps for the AI to write the docs
+  check           Find missing or outdated parts of the docs
 
 Options:
-  -h, --help     Show this help
-  -v, --version  Show the version
+  --agent <name>  With init: connect an AI tool (${AGENTS.join(", ")}).
+                  Repeat it to connect several. Safe to run again.
+  -h, --help      Show this help
+  -v, --version   Show the version
 `;
+
+const INVOCATIONS: Record<Agent, string> = {
+  claude: "/makedoc",
+  codex: "$makedoc",
+  copilot: "/makedoc",
+};
 
 function readVersion(): string {
   const packageJson: unknown = JSON.parse(
@@ -44,6 +53,7 @@ function parse(argv: readonly string[]) {
     args: [...argv],
     allowPositionals: true,
     options: {
+      agent: { type: "string", multiple: true },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
@@ -54,19 +64,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function runInit(root: string, io: Io): number {
-  let result: ReturnType<typeof installSkill>;
+function runInit(root: string, io: Io, agents: readonly Agent[]): number {
+  const names = agents.map((agent) => AGENT_NAMES[agent]).join(", ");
+  let written: string[];
   try {
-    result = installSkill(root);
+    written = connectAgents(root, agents);
   } catch (error) {
-    io.stderr(`Could not add the skill: ${errorMessage(error)}\n`);
+    io.stderr(`Could not connect to ${names}: ${errorMessage(error)}\n`);
     return 1;
   }
 
+  if (written.length === 0) {
+    io.stdout(`Already connected to ${names}, so nothing was changed.\n`);
+    return 0;
+  }
+  const files = written.map((path) => `- ${relative(root, path)}`).join("\n");
+  const usage = agents
+    .map((agent) => `- ${AGENT_NAMES[agent]}: ${INVOCATIONS[agent]}`)
+    .join("\n");
   io.stdout(
-    result.status === "created"
-      ? `Created ${result.path}\nIn Claude Code, run /makedoc or ask Claude to update the docs.\n`
-      : `${result.path} already exists, so nothing was changed.\n`,
+    `Connected to ${names}.\nWrote:\n${files}\nTo update the docs, run the skill or ask the AI to update them:\n${usage}\n`,
   );
   return 0;
 }
@@ -135,8 +152,10 @@ export function run(
     return 0;
   }
 
+  const agentNames = parsed.values.agent ?? [];
+  const agents = [...new Set(agentNames.filter(isAgent))];
   const handlers = new Map([
-    ["init", runInit],
+    ["init", (projectRoot: string, output: Io) => runInit(projectRoot, output, agents)],
     ["collect", runCollect],
     ["check", runCheck],
   ]);
@@ -149,6 +168,24 @@ export function run(
   if (extra.length > 0) {
     io.stderr(
       `"makedoc ${command}" takes no arguments, but got: ${extra.join(" ")}\nRun it inside the project directory.\n`,
+    );
+    return 2;
+  }
+
+  if (agentNames.length > 0 && command !== "init") {
+    io.stderr(`--agent only works with "makedoc init".\n`);
+    return 2;
+  }
+
+  const unknown = agentNames.filter((name) => !isAgent(name));
+  if (unknown.length > 0) {
+    io.stderr(`Unknown agent: ${unknown.join(", ")}\nChoose from: ${AGENTS.join(", ")}\n`);
+    return 2;
+  }
+
+  if (command === "init" && agents.length === 0) {
+    io.stderr(
+      `Choose an AI tool to connect, for example "makedoc init --agent claude".\nChoose from: ${AGENTS.join(", ")}\n`,
     );
     return 2;
   }

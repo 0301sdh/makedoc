@@ -2,6 +2,19 @@
   "name": "makedoc",
   "version": "0.1.0",
   "description": "A CLI that helps AI write project docs from code, commits and work logs",
+  "keywords": [
+    "documentation",
+    "ai",
+    "cli",
+    "claude-code",
+    "codex",
+    "copilot"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0301sdh/makedoc.git"
+  },
   "type": "module",
   "bin": {
     "makedoc": "dist/bin.js"
