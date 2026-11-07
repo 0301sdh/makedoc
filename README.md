@@ -134,4 +134,4 @@ GitHub Actions는 `main` 브랜치에 push하거나 PR을 생성·업데이트�
 
 ## 라이선스
 
-MIT
+[MIT](LICENSE)
